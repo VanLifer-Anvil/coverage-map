@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open-Network SIM Coverage Map</title>
+<meta name="description" content="Compare your mobile network's data coverage with an open-network SIM that uses EE, O2, Three and Vodafone across Great Britain.">
+<link rel="stylesheet" href="lib/leaflet.css">
+<script src="lib/leaflet.js"></script>
+<style>
+  :root { --bg:#ffffff; --fg:#1b1f23; --muted:#5f6b76; --line:#dde2e6; --accent:#15803d; --chip:#f1f4f6; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; margin:0; font:15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--fg); background:var(--bg); }
+  #map { position:absolute; inset:0; background:#eef1f3; }
+  .leaflet-tile-pane .base { filter: grayscale(1) contrast(.92) brightness(1.04); }
+
+  .panel { position:absolute; z-index:1000; top:12px; left:12px; width:310px; max-height:calc(100% - 24px); overflow:auto;
+           background:var(--bg); border:1px solid var(--line); border-radius:10px; box-shadow:0 4px 18px rgba(0,0,0,.14); }
+  .panel header { padding:14px 16px 10px; border-bottom:1px solid var(--line); }
+  .panel h1 { margin:0; font-size:17px; line-height:1.25; }
+  .panel header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
+  .sec { padding:12px 16px; border-bottom:1px solid var(--line); }
+  .sec:last-child { border-bottom:0; }
+  .sec h2 { margin:0 0 8px; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  .tabs { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .tabs button { font:inherit; font-size:13.5px; padding:8px 6px; border:1px solid var(--line); background:var(--chip); border-radius:7px; cursor:pointer; color:var(--fg); }
+  .tabs button[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  select, input[type=text] { width:100%; font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--fg); }
+  .row { display:flex; gap:6px; }
+  .row button { font:inherit; padding:8px 12px; border:0; border-radius:7px; background:var(--fg); color:#fff; cursor:pointer; white-space:nowrap; }
+  .link { background:none; border:0; padding:6px 0 0; color:var(--accent); font:inherit; font-size:13.5px; cursor:pointer; text-decoration:underline; }
+  .msg { font-size:13px; color:#b91c1c; margin-top:6px; min-height:0; }
+  .key div { display:flex; align-items:center; gap:8px; font-size:13.5px; padding:2px 0; }
+  .sw { width:16px; height:16px; border-radius:4px; flex:none; }
+  .hint { font-size:13px; color:var(--muted); margin:8px 0 0; }
+  .small { font-size:12px; color:var(--muted); line-height:1.5; }
+  .hide { display:none !important; }
+
+  /* compare divider */
+  #divider { position:absolute; top:0; bottom:0; width:0; z-index:900; pointer-events:none; }
+  #divider .line { position:absolute; top:0; bottom:0; left:-1.5px; width:3px; background:#fff; box-shadow:0 0 4px rgba(0,0,0,.4); }
+  #divider .knob { position:absolute; top:50%; left:-20px; width:40px; height:40px; margin-top:-20px; border-radius:50%;
+                   background:#fff; box-shadow:0 1px 6px rgba(0,0,0,.35); pointer-events:auto; cursor:ew-resize; touch-action:none;
+                   display:flex; align-items:center; justify-content:center; font-size:16px; color:#333; user-select:none; }
+  .side-label { position:absolute; top:12px; z-index:901; background:rgba(27,31,35,.85); color:#fff; font-size:13px; padding:5px 10px; border-radius:6px; pointer-events:none; }
+
+  .toggle-panel { display:none; }
+  @media (max-width:700px) {
+    .panel { top:auto; bottom:0; left:0; right:0; width:auto; max-height:52%; border-radius:12px 12px 0 0; }
+    .panel.collapsed .body { display:none; }
+    .toggle-panel { display:block; position:absolute; right:12px; top:12px; font:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--chip); cursor:pointer; }
+    .panel header { position:relative; padding-right:90px; }
+    .side-label { top:auto; bottom:calc(52% + 10px); }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="divider" class="hide"><div class="line"></div><div class="knob" id="knob" aria-label="Drag to compare">&#8596;</div></div>
+<div id="labelL" class="side-label hide"></div>
+<div id="labelR" class="side-label hide"></div>
+
+<div class="panel" id="panel">
+  <header>
+    <h1>Open-Network SIM Coverage Map</h1>
+    <p>4G and 5G data coverage across Great Britain</p>
+    <button class="toggle-panel" id="togglePanel">Hide</button>
+  </header>
+  <div class="body">
+    <div class="sec">
+      <h2>Find a place</h2>
+      <div class="row">
+        <input type="text" id="pc" placeholder="Postcode, e.g. LL55 4UL" autocomplete="postal-code">
+        <button id="go">Go</button>
+      </div>
+      <button class="link" id="locate">Use my location</button>
+      <div class="msg" id="msg"></div>
+    </div>
+
+    <div class="sec">
+      <h2>View</h2>
+      <div class="tabs" role="group">
+        <button data-view="compare" aria-pressed="true">Compare</button>
+        <button data-view="any" aria-pressed="false">Open SIM</button>
+        <button data-view="count" aria-pressed="false">Networks per area</button>
+        <button data-view="single" aria-pressed="false">One network</button>
+      </div>
+      <div id="netPick" style="margin-top:10px">
+        <label class="small" for="net">Your current network</label>
+        <select id="net">
+          <option value="ee">EE (incl. BT, Plusnet, 1pMobile)</option>
+          <option value="o2">O2 (incl. giffgaff, Tesco Mobile, Sky)</option>
+          <option value="three">Three (incl. SMARTY, iD Mobile)</option>
+          <option value="vodafone">Vodafone (incl. VOXI, Lebara, Talkmobile)</option>
+        </select>
+      </div>
+      <p class="hint" id="viewHint"></p>
+    </div>
+
+    <div class="sec">
+      <h2>Key</h2>
+      <div class="key" id="key"></div>
+    </div>
+
+    <div class="sec small">
+      Coverage shown is each network's own predicted 4G and 5G outdoor and indoor coverage, combined into one map.
+      It is a prediction, not measured signal. Hills, trees, buildings and vehicle bodywork can reduce signal,
+      and actual speeds vary. Network maps dated December 2024 to March 2025. Covers Great Britain including the Hebrides, Orkney and Scilly; not Shetland or Northern Ireland.
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var NETS = {
+    ee:       { name:'EE',       strong:'#009c9c', weak:'#80cdcd' },
+    o2:       { name:'O2',       strong:'#0063be', weak:'#7db0e1' },
+    three:    { name:'Three',    strong:'#dc350e', weak:'#ec9680' },
+    vodafone: { name:'Vodafone', strong:'#e60000', weak:'#f58c8c' }
+  };
+  var ANY = { strong:'#16a34a', weak:'#eab308' };
+  var COUNT = ['#ef4444', '#f97316', '#84cc16', '#15803d'];
+
+  var map = L.map('map', { minZoom:4, maxZoom:13, zoomControl:true, attributionControl:true })
+             ;
+  var GB = [[49.9, -7.8], [59.3, 1.8]];
+  if (window.innerWidth < 700) map.fitBounds(GB, { paddingTopLeft:[10, 10], paddingBottomRight:[10, Math.round(window.innerHeight * 0.52) + 10] });
+  else map.fitBounds(GB, { paddingTopLeft:[330, 10], paddingBottomRight:[10, 10] });
+
+  map.zoomControl.setPosition('topright');
+
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 13, className:'base',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  function cov(layer) {
+    return L.tileLayer('tiles/' + layer + '/{z}/{x}/{y}.png', {
+      minZoom:4, maxZoom:13, minNativeZoom:5, maxNativeZoom:11, opacity:.78, bounds:[[49.7,-8],[59.5,2]],
+      errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=='
+    });
+  }
+  var layers = { any:cov('any'), count:cov('count'), ee:cov('ee'), o2:cov('o2'), three:cov('three'), vodafone:cov('vodafone') };
+
+  var view = 'compare', shown = [];
+  var split = window.innerWidth < 700 ? 0.5 : (330 + (window.innerWidth - 330) / 2) / window.innerWidth;
+  var divider = document.getElementById('divider'), knob = document.getElementById('knob');
+  var labelL = document.getElementById('labelL'), labelR = document.getElementById('labelR');
+
+  function setShown(list) {
+    shown.forEach(function (l) { if (list.indexOf(l) < 0) { map.removeLayer(l); l.getContainer && l.getContainer() && (l.getContainer().style.clip = ''); } });
+    list.forEach(function (l) { if (!map.hasLayer(l)) l.addTo(map); });
+    shown = list;
+  }
+
+  function clip() {
+    if (view !== 'compare') return;
+    var net = document.getElementById('net').value;
+    var left = layers[net], right = layers.any;
+    var size = map.getSize();
+    var nw = map.containerPointToLayerPoint([0, 0]);
+    var se = map.containerPointToLayerPoint(size);
+    var x = nw.x + size.x * split;
+    if (left.getContainer()) left.getContainer().style.clip = 'rect(' + [nw.y, x, se.y, nw.x].join('px,') + 'px)';
+    if (right.getContainer()) right.getContainer().style.clip = 'rect(' + [nw.y, se.x, se.y, x].join('px,') + 'px)';
+    divider.style.left = (size.x * split) + 'px';
+    var r = map.getContainer().getBoundingClientRect();
+    labelL.style.left = Math.max(8, size.x * split - labelL.offsetWidth - 10) + 'px';
+    labelR.style.left = Math.min(size.x - labelR.offsetWidth - 8, size.x * split + 10) + 'px';
+  }
+
+  function sw(c) { return '<span class="sw" style="background:' + c + '"></span>'; }
+  function keyFor(c, name) {
+    return '<div>' + sw(c.strong) + (name ? name + ': ' : '') + 'good indoors and outdoors</div>' +
+           '<div>' + sw(c.weak) + (name ? name + ': ' : '') + 'outdoors only or limited</div>';
+  }
+
+  function render() {
+    var net = document.getElementById('net').value;
+    document.querySelectorAll('.tabs button').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.view === view); });
+    document.getElementById('netPick').classList.toggle('hide', view === 'any' || view === 'count');
+    document.querySelector('label[for=net]').textContent = view === 'single' ? 'Network' : 'Your current network';
+    var cmp = view === 'compare';
+    [divider, labelL, labelR].forEach(function (e) { e.classList.toggle('hide', !cmp); });
+    var hint = '', key = '';
+
+    if (cmp) {
+      setShown([layers[net], layers.any]);
+      layers.any.getContainer().style.clip = '';
+      labelL.textContent = NETS[net].name + ' only';
+      labelR.textContent = 'Open-network SIM';
+      hint = 'Left: your network on its own. Right: the open-network SIM, which picks up whichever network is strongest. Drag the divider to compare.';
+      key = keyFor(NETS[net], NETS[net].name) + keyFor(ANY, 'Open SIM');
+      setTimeout(clip, 0);
+    } else if (view === 'any') {
+      setShown([layers.any]);
+      hint = 'Best data coverage available from any of EE, O2, Three or Vodafone.';
+      key = keyFor(ANY);
+    } else if (view === 'count') {
+      setShown([layers.count]);
+      hint = 'How many of the four networks reach each area. More networks means a better chance of a usable signal.';
+      key = COUNT.map(function (c, i) { return '<div>' + sw(c) + (i + 1) + ' network' + (i ? 's' : '') + '</div>'; }).join('');
+    } else {
+      setShown([layers[net]]);
+      hint = NETS[net].name + "'s own coverage, 4G and 5G combined.";
+      key = keyFor(NETS[net]);
+    }
+    Object.keys(layers).forEach(function (k) { var c = layers[k].getContainer && layers[k].getContainer(); if (c && !cmp) c.style.clip = ''; });
+    document.getElementById('viewHint').textContent = hint;
+    document.getElementById('key').innerHTML = key;
+  }
+
+  document.querySelectorAll('.tabs button').forEach(function (b) {
+    b.addEventListener('click', function () { view = b.dataset.view; render(); });
+  });
+  document.getElementById('net').addEventListener('change', render);
+  map.on('move zoom resize layeradd', clip);
+
+  // Divider dragging
+  var dragging = false;
+  knob.addEventListener('pointerdown', function (e) { dragging = true; knob.setPointerCapture(e.pointerId); e.preventDefault(); });
+  knob.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var r = map.getContainer().getBoundingClientRect();
+    split = Math.min(.95, Math.max(.05, (e.clientX - r.left) / r.width));
+    clip();
+  });
+  knob.addEventListener('pointerup', function () { dragging = false; });
+  L.DomEvent.disableClickPropagation(divider);
+
+  // Postcode search (postcodes.io, free open data)
+  var marker = null, msg = document.getElementById('msg');
+  function place(lat, lon, label) {
+    if (marker) map.removeLayer(marker);
+    marker = L.circleMarker([lat, lon], { radius:8, color:'#111', weight:3, fillColor:'#fff', fillOpacity:1 })
+               .addTo(map).bindTooltip(label, { permanent:true, direction:'top', offset:[0,-8] });
+    map.setView([lat, lon], 12);
+  }
+  function search() {
+    var q = document.getElementById('pc').value.trim();
+    msg.textContent = '';
+    if (!q) return;
+    fetch('https://api.postcodes.io/postcodes/' + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status === 200 && d.result && d.result.latitude) place(d.result.latitude, d.result.longitude, d.result.postcode);
+        else msg.textContent = 'Postcode not found. Check it and try again.';
+      })
+      .catch(function () { msg.textContent = 'Search is unavailable right now.'; });
+  }
+  document.getElementById('go').addEventListener('click', search);
+  document.getElementById('pc').addEventListener('keydown', function (e) { if (e.key === 'Enter') search(); });
+  document.getElementById('locate').addEventListener('click', function () {
+    msg.textContent = '';
+    if (!navigator.geolocation) { msg.textContent = 'Location is not available on this device.'; return; }
+    navigator.geolocation.getCurrentPosition(
+      function (p) { place(p.coords.latitude, p.coords.longitude, 'You are here'); },
+      function () { msg.textContent = 'Could not get your location.'; },
+      { enableHighAccuracy:true, timeout:10000 });
+  });
+
+  var panel = document.getElementById('panel'), tg = document.getElementById('togglePanel');
+  tg.addEventListener('click', function () { panel.classList.toggle('collapsed'); tg.textContent = panel.classList.contains('collapsed') ? 'Show' : 'Hide'; });
+
+  map.attributionControl.addAttribution('Coverage: EE, O2, Three &amp; Vodafone published maps');
+  render();
+})();
+</script>
+</body>
+</html>
