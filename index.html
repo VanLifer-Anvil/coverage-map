@@ -7,6 +7,7 @@
 <meta name="description" content="Compare your mobile network's data coverage with an open-network SIM that uses EE, O2, Three and Vodafone across Great Britain.">
 <link rel="stylesheet" href="lib/leaflet.css">
 <script src="lib/leaflet.js"></script>
+<script src="gb-outline.js"></script>
 <style>
   :root { --bg:#ffffff; --fg:#1b1f23; --muted:#5f6b76; --line:#dde2e6; --accent:#15803d; --chip:#f1f4f6; }
   * { box-sizing:border-box; }
@@ -84,10 +85,10 @@
     <div class="sec">
       <h2>View</h2>
       <div class="tabs" role="group">
-        <button data-view="compare" aria-pressed="true">Compare</button>
+        <button data-view="compare" aria-pressed="false">Compare</button>
         <button data-view="any" aria-pressed="false">Open SIM</button>
         <button data-view="count" aria-pressed="false">Networks per area</button>
-        <button data-view="pick" aria-pressed="false">Pick networks</button>
+        <button data-view="pick" aria-pressed="true">Pick networks</button>
       </div>
       <div id="ticks" class="ticks hide">
         <label><input type="checkbox" value="any" checked><span class="sw" style="background:#16a34a"></span><span>Open-network SIM<small>all four networks</small></span></label>
@@ -140,9 +141,16 @@
 
   map.zoomControl.setPosition('topright');
 
+  map.createPane('basemap').style.zIndex = 150;
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 13, className:'base',
+    maxZoom: 13, className:'base', pane:'basemap',
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  // Blank out everything outside Great Britain (Ireland, Northern Ireland, the Continent)
+  map.createPane('mask').style.zIndex = 180;
+  L.polygon([[[85, -180], [85, 180], [-85, 180], [-85, -180]]].concat(window.GB_RINGS || []), {
+    pane:'mask', stroke:false, fillColor:'#e9edf0', fillOpacity:1, interactive:false
   }).addTo(map);
 
   function cov(layer) {
@@ -206,7 +214,7 @@
                                   bounds:[[49.7,-8],[59.5,2]] });
   var tickBoxes = document.querySelectorAll('#ticks input');
 
-  var view = 'compare', shown = [];
+  var view = 'pick', shown = [];
   var split = window.innerWidth < 700 ? 0.5 : (330 + (window.innerWidth - 330) / 2) / window.innerWidth;
   var divider = document.getElementById('divider'), knob = document.getElementById('knob');
   var labelL = document.getElementById('labelL'), labelR = document.getElementById('labelR');
