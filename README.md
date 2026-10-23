@@ -11,7 +11,7 @@ It shows what a customer gets on their current network compared with an open-net
 - **Compare** – your current network on the left, the open-network SIM on the right, with a slider to drag between them.
 - **Open SIM** – the best coverage available from any of the four networks.
 - **Networks per area** – how many of the four networks reach each spot.
-- **One network** – a single network's coverage.
+- **Pick networks** – tick any combination of EE, O2, Three, Vodafone and the open-network SIM. Each spot shows the best ticked network in its own colour; where none reach, the open SIM's colour shows the extra coverage it adds.
 
 There is also a postcode search and a "Use my location" button.
 

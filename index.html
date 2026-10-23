@@ -35,6 +35,10 @@
   .hint { font-size:13px; color:var(--muted); margin:8px 0 0; }
   .small { font-size:12px; color:var(--muted); line-height:1.5; }
   .hide { display:none !important; }
+  .ticks { margin-top:10px; }
+  .ticks label { display:flex; align-items:center; gap:9px; padding:5px 0; cursor:pointer; font-size:14px; }
+  .ticks input { width:17px; height:17px; margin:0; accent-color:var(--accent); flex:none; }
+  .ticks small { display:block; font-size:12px; color:var(--muted); line-height:1.3; }
 
   /* compare divider */
   #divider { position:absolute; top:0; bottom:0; width:0; z-index:900; pointer-events:none; }
@@ -83,7 +87,14 @@
         <button data-view="compare" aria-pressed="true">Compare</button>
         <button data-view="any" aria-pressed="false">Open SIM</button>
         <button data-view="count" aria-pressed="false">Networks per area</button>
-        <button data-view="single" aria-pressed="false">One network</button>
+        <button data-view="pick" aria-pressed="false">Pick networks</button>
+      </div>
+      <div id="ticks" class="ticks hide">
+        <label><input type="checkbox" value="any" checked><span class="sw" style="background:#16a34a"></span><span>Open-network SIM<small>all four networks</small></span></label>
+        <label><input type="checkbox" value="ee"><span class="sw" style="background:#009c9c"></span><span>EE<small>BT, Plusnet, 1pMobile</small></span></label>
+        <label><input type="checkbox" value="o2"><span class="sw" style="background:#0063be"></span><span>O2<small>giffgaff, Tesco Mobile, Sky</small></span></label>
+        <label><input type="checkbox" value="three"><span class="sw" style="background:#dc350e"></span><span>Three<small>SMARTY, iD Mobile</small></span></label>
+        <label><input type="checkbox" value="vodafone"><span class="sw" style="background:#e60000"></span><span>Vodafone<small>VOXI, Lebara, Talkmobile</small></span></label>
       </div>
       <div id="netPick" style="margin-top:10px">
         <label class="small" for="net">Your current network</label>
@@ -142,6 +153,59 @@
   }
   var layers = { any:cov('any'), count:cov('count'), ee:cov('ee'), o2:cov('o2'), three:cov('three'), vodafone:cov('vodafone') };
 
+  // Tick-box view: combine the ticked layers pixel by pixel so overlaps stay clean.
+  // Each spot shows the best ticked network (its own colour); where none of them
+  // reach, the open-network SIM's colour shows instead (the extra coverage).
+  function hexRgb(h) { return [parseInt(h.substr(1,2),16), parseInt(h.substr(3,2),16), parseInt(h.substr(5,2),16)]; }
+  var imgCache = {};
+  function loadLevels(layer, c) {
+    var url = 'tiles/' + layer + '/' + c.z + '/' + c.x + '/' + c.y + '.png';
+    if (!imgCache[url]) imgCache[url] = new Promise(function (resolve) {
+      var im = new Image();
+      im.onload = function () {
+        var cv = document.createElement('canvas'); cv.width = cv.height = 256;
+        var cx = cv.getContext('2d'); cx.drawImage(im, 0, 0);
+        var a = cx.getImageData(0, 0, 256, 256).data, lv = new Uint8Array(65536);
+        for (var i = 0; i < 65536; i++) { var al = a[i * 4 + 3]; lv[i] = al > 150 ? 2 : (al > 20 ? 1 : 0); }
+        resolve(lv);
+      };
+      im.onerror = function () { resolve(null); };
+      im.src = url;
+    });
+    return imgCache[url];
+  }
+  var picked = [];
+  var PickLayer = L.GridLayer.extend({
+    createTile: function (c, done) {
+      var tile = document.createElement('canvas'); tile.width = tile.height = 256;
+      var list = picked.slice();
+      Promise.all(list.map(function (k) { return loadLevels(k, c); })).then(function (levels) {
+        var ctx = tile.getContext('2d'), img = ctx.createImageData(256, 256), d = img.data;
+        var nets = [], anyLv = null;
+        list.forEach(function (k, i) {
+          if (k === 'any') anyLv = levels[i];
+          else if (levels[i]) nets.push({ lv: levels[i], s: hexRgb(NETS[k].strong), w: hexRgb(NETS[k].weak) });
+        });
+        var as = hexRgb(ANY.strong), aw = hexRgb(ANY.weak);
+        for (var i = 0; i < 65536; i++) {
+          var col = null, best = 0;
+          for (var n = 0; n < nets.length; n++) {
+            var v = nets[n].lv[i];
+            if (v > best) { best = v; col = v === 2 ? nets[n].s : nets[n].w; }
+          }
+          if (!col && anyLv && anyLv[i]) col = anyLv[i] === 2 ? as : aw;
+          if (col) { d[i*4] = col[0]; d[i*4+1] = col[1]; d[i*4+2] = col[2]; d[i*4+3] = 255; }
+        }
+        ctx.putImageData(img, 0, 0);
+        done(null, tile);
+      });
+      return tile;
+    }
+  });
+  var pickLayer = new PickLayer({ minZoom:4, maxZoom:13, minNativeZoom:5, maxNativeZoom:11, opacity:.72,
+                                  bounds:[[49.7,-8],[59.5,2]] });
+  var tickBoxes = document.querySelectorAll('#ticks input');
+
   var view = 'compare', shown = [];
   var split = window.innerWidth < 700 ? 0.5 : (330 + (window.innerWidth - 330) / 2) / window.innerWidth;
   var divider = document.getElementById('divider'), knob = document.getElementById('knob');
@@ -178,8 +242,8 @@
   function render() {
     var net = document.getElementById('net').value;
     document.querySelectorAll('.tabs button').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.view === view); });
-    document.getElementById('netPick').classList.toggle('hide', view === 'any' || view === 'count');
-    document.querySelector('label[for=net]').textContent = view === 'single' ? 'Network' : 'Your current network';
+    document.getElementById('netPick').classList.toggle('hide', view !== 'compare');
+    document.getElementById('ticks').classList.toggle('hide', view !== 'pick');
     var cmp = view === 'compare';
     [divider, labelL, labelR].forEach(function (e) { e.classList.toggle('hide', !cmp); });
     var hint = '', key = '';
@@ -201,9 +265,19 @@
       hint = 'How many of the four networks reach each area. More networks means a better chance of a usable signal.';
       key = COUNT.map(function (c, i) { return '<div>' + sw(c) + (i + 1) + ' network' + (i ? 's' : '') + '</div>'; }).join('');
     } else {
-      setShown([layers[net]]);
-      hint = NETS[net].name + "'s own coverage, 4G and 5G combined.";
-      key = keyFor(NETS[net]);
+      var on = [], names = [];
+      tickBoxes.forEach(function (t) { if (t.checked) on.push(t.value); });
+      picked = on;
+      setShown(on.length ? [pickLayer] : []);
+      if (on.length) pickLayer.redraw();
+      if (on.indexOf('any') >= 0) key += keyFor(ANY, 'Open SIM');
+      on.forEach(function (k) { if (k !== 'any') { key += keyFor(NETS[k], NETS[k].name); names.push(NETS[k].name); } });
+      if (!on.length) hint = 'Tick one or more networks to show them on the map.';
+      else if (on.indexOf('any') >= 0 && names.length) hint = 'Any green or yellow showing around ' + names.join(' / ') + ' is extra coverage the open-network SIM gives you.';
+      else if (names.length > 1) hint = 'Where the ticked networks overlap, the one with the better signal is shown.';
+      else if (names.length) hint = names[0] + "'s own coverage, 4G and 5G combined.";
+      else hint = 'The open-network SIM on its own. Tick your own network as well to see what the SIM adds.';
+      if (!key) key = '<div class="small">Nothing ticked.</div>';
     }
     Object.keys(layers).forEach(function (k) { var c = layers[k].getContainer && layers[k].getContainer(); if (c && !cmp) c.style.clip = ''; });
     document.getElementById('viewHint').textContent = hint;
@@ -214,6 +288,7 @@
     b.addEventListener('click', function () { view = b.dataset.view; render(); });
   });
   document.getElementById('net').addEventListener('change', render);
+  tickBoxes.forEach(function (t) { t.addEventListener('change', render); });
   map.on('move zoom resize layeradd', clip);
 
   // Divider dragging
